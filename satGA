@@ -15,15 +15,16 @@ if (length(args)<3 & length(args)>5) {
 cmdArgs <- commandArgs(trailingOnly = FALSE)
 scriptPath <- normalizePath(dirname(sub("^--file=", "", cmdArgs[grep("^--file=", cmdArgs)])))[1]
 
+local({
+  r <- getOption("repos")
+  r["CRAN"] <- "https://cran.r-project.org"
+  options(repos = r)
+})
+
 if (file.access(.libPaths(), mode=2)[1]!=0) {
   if (!file.exists(file.path(scriptPath, "Rlibs"))) {
     dir.create(file.path(scriptPath, "Rlibs"))
   }
-  local({
-    r <- getOption("repos")
-    r["CRAN"] <- "https://cran.r-project.org"
-    options(repos = r)
-  })
   .libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
 }
 
