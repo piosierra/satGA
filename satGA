@@ -1,0 +1,376 @@
+#!/usr/bin/env Rscript
+
+# Select best candidates for relevant sats accumulation and return plots and 
+# tables with the information.
+
+options(warn = 0)
+
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args)<3 & length(args)>5) {
+  print("usage: satselect file.fai file.bed output_folder [number_of_chr] [opt$window_size]")
+  quit()
+}
+
+cmdArgs <- commandArgs(trailingOnly = FALSE)
+scriptPath <- normalizePath(dirname(sub("^--file=", "", cmdArgs[grep("^--file=", cmdArgs)])))[1]
+
+if (file.access(.libPaths(), mode=2)[1]!=0) {
+  if (!file.exists(file.path(scriptPath, "Rlibs"))) {
+    dir.create(file.path(scriptPath, "Rlibs"))
+  }
+  local({
+    r <- getOption("repos")
+    r["CRAN"] <- "https://cran.r-project.org"
+    options(repos = r)
+  })
+  .libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
+}
+
+if (suppressPackageStartupMessages(!require("data.table", quietly = TRUE))) {
+  print("Intalling package [data.table]")
+  install.packages("data.table", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("ggplot2", quietly = TRUE))) {
+  print("Intalling package [ggplot2]")
+  install.packages("ggplot2", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("ggpubr", quietly = TRUE))) {
+  print("Intalling package [ggpubr]")
+  install.packages("ggpubr", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("getopt", quietly = TRUE))) {
+  print("Intalling package [getopt]")
+  install.packages("getopt", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("stringi", quietly = TRUE))) {
+  print("Intalling package [stringi]")
+  install.packages("stringi", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("BiocManager", quietly = TRUE))) {
+  print("Intalling package [BiocManager]")
+  install.packages("BiocManager", verbose =F) #
+}
+if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
+  print("Intalling package [Biostrings]")
+  BiocManager::install("Biostrings", verbose =F) #
+}
+
+spec <- matrix(
+  c("genome",         "g", 1, "character", # genome assembly
+    "output_folder",  "o", 1, "character", # Output foder
+    "chr",            "c", 1, "integer",   # Number of chromosomes 
+    "sca_prefix",     "s", 1, "character", # Scaffold identifier 
+    "percentage",     "p", 1, "double", # Percentage of chr to call a censat
+    "window_size",    "w", 1, "integer",   # Window size
+    "min_sat",        "m", 1, "integer",   # Min sat size
+    "help",           "h", 0, "logical"),  # Show this help 
+  byrow = TRUE, ncol = 4)
+
+opt <- getopt(spec)
+
+if (!is.null(opt$help)) {
+  cat(gsub("\\] \\[","\\]\n\\[",getopt(spec, usage = TRUE)))
+  q(status = 1)
+}
+
+if (is.null(opt$genome)) {
+  stop("[--genome|-g] missing")
+}
+
+if (is.null(opt$output_folder)) {
+  if (grepl("/", opt$genome)) {
+    opt$output_folder <- gsub("/.*","",opt$genome)
+  } else {
+    opt$output_folder <- "."
+  } 
+}
+
+if (is.null(opt$min_sat)) {
+  opt$min_sat <- 4
+}
+
+if (is.null(opt$percentage)) {
+  opt$percentage <- 0.4
+}
+
+if (is.null(opt$chr)) {
+  opt$chr <- -1
+}
+
+if (is.null(opt$sca_prefix)) {
+  opt$sca_prefix <- ""
+}
+
+if (is.null(opt$window_size)) {
+  opt$window_size <- 100000
+} else {
+  opt$window_size <- as.numeric(opt$window_size)
+}
+
+# Auxiliary functions
+
+wfasta <- function(fasta_data, f) {
+  fileconn <- file(f)
+  writeLines(t(fasta_data), fileconn)
+  close(fileconn)
+}
+
+samread <- function(g,l) {
+  fa_raw <- fread(cmd = paste("samtools faidx", g, l), header = F, fill = T, sep = "\n")
+  fa_raw[, h := grepl(">", V1)]
+  fa_oneline <- fa_raw[, .(paste0(V1, collapse = "")), by = rleid(h)]
+  return(data.table(name = fa_oneline[rep(c(TRUE, FALSE), length = .N)]$V1, 
+                    seq = fa_oneline[rep(c(FALSE, TRUE), length = .N)]$V1))
+}
+
+### Main
+oldpath <- getwd()
+
+if (!file.exists(paste0(opt$genome,".fai"))) {
+  system(paste0("samtools faidx ",opt$genome))
+}
+
+if (!file.exists(paste0(opt$genome,".tan.1aln"))) {
+  system(paste0("FasTAN ",opt$genome, " ", opt$genome,".tan"))
+}
+
+if (!file.exists(paste0(opt$genome,".tan.1aln.bed"))) {
+  system(paste0("tanbed ",paste0(opt$genome,".tan.1aln")," > ", paste0(opt$genome,".tan.1aln.bed")))
+}
+
+fai <- fread(paste0(opt$genome,".fai"))
+bed <- fread(paste0(opt$genome,".tan.1aln.bed"))
+fai[,V1:=gsub(" .*","", V1)]
+bed[,V1:=gsub(" .*","", V1)]
+
+if (opt$chr == -1 & opt$sca_prefix=="") {
+  opt$chr <- nrow(fai[grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1)])
+} 
+if (opt$sca_prefix!="") {
+  fai2 <- fai[grepl(opt$sca_prefix, V1)]
+  fai <- fai[!(grepl(opt$sca_prefix, V1))]
+} else {
+  fai2 <- fai[(opt$chr+1):nrow(fai)]
+  fai <- fai[1:opt$chr]
+}
+
+# ml stores the fai info with the collapsed scaffolds.
+ml <- fai[,1:2]
+colnames(ml) <- c("chr","x")
+ml <- rbindlist(list(ml, data.table(
+  chr = "scaffolds", x = sum(fai2$V2)
+)))
+fai2 <- data.table(V1 = fai2$V1,
+                   offset = cumsum(fai2$V2) - fai2$V2)
+bed <- merge(bed, fai2, by = "V1", all.x = T)
+bed[is.na(offset), offset := 0]
+bed[, V2 := V2 + offset]
+bed[, V3 := V3 + offset]
+bed[!(bed$V1 %in% fai$V1), V1 := "scaffolds"]
+
+ml[, xmax_pos := x / opt$window_size]
+ml[, chr := as.factor(chr)]
+# Remove TRs with repeat len < 5
+bed <- bed[V4 > opt$min_sat]
+bed[, len := V3 - V2]
+bed[, cnt := len / V4]
+beds <- bed[cnt > 5, sum(len), V4][order(-V1)]
+bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
+
+# Make the list of sats with the top 3 in len all across the genome
+# We use a greedy approach merging the most proximal to each selected one
+sats <- list()
+for (j in 1:3) {
+  sats[[j]] <- beds$V4[1]
+  beds <- beds[!(V4 > sats[[j]] * 0.95 & V4 < sats[[j]] * 1.04)]
+}
+# And the one with the longest contiguous TR of each chromosome if it is not already on the list
+if (nrow(bedu) > 0) {
+  for (j in 1:nrow(bedu)) {
+    new <- bedu[j]$V4
+    h <- 0
+    while (h < length(sats)) {
+      h <- h + 1
+      if (new > sats[[h]] * 0.95 & new < sats[[h]] * 1.04) {
+        new <- 0
+      }
+    }
+    if (new != 0) {
+      sats[[length(sats) + 1]] <- new
+    }
+  }
+}
+
+# Build the sats list and make sure their margins do not overlap.
+sats2 <- data.table(
+  b = unlist(sats),
+  s = unlist(sats) * 0.95,
+  e = unlist(sats) * 1.04
+)[order(s)]
+sats2[, x := s <= data.table::shift(e)]
+sats2[, ne := e]
+sats2[, ns := s]
+sats2[, ns := (s + data.table::shift(e)) / 2]
+sats2[, ne := (e + data.table::shift(s, -1)) / 2 - 0.005]
+sats2[x == T, s := ns]
+sats2[data.table::shift(x, -1) == T, e := ne]
+# Then assign to each bed annotation the relevant sat.
+der <- unlist(lapply(1:nrow(bed), function(x) {
+  che <- bed$V4[x]  <= sats2$e & bed$V4[x]  >= sats2$s
+  blu <- sats2[che]$b
+  if (length(blu) > 0) {
+    return(blu)
+  }
+  else {
+    return(0)
+  }
+}))
+
+bed$sat <- der
+# And remove entries with that do not belong to the sat list.
+bed <- bed[sat > 0]
+
+bedu <- bed[cnt > 5 & len > 60000][order(-len)][, .SD[1], V1]
+bedu <- bedu[V1!="scaffolds"]
+censatf <- 0
+if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= (nrow(fai) * opt$percentage))) { # Select centromere sat candidate
+  censatf <- bedu[,.N,sat][order(-N)][1]$sat # In terms of family, for the plot
+  censat <- bedu[sat==censatf,.N,V4][order(-N)][1]$V4 # In terms of actual size, for consensus
+  centint <- bed[sat==censatf & len>40000,.(s=min(V2), e=max(V3)), V1]
+  centint$chr <- factor(centint$V1, levels= c(fai$V1, "scaffolds"))
+  bedcen <- bedu[V4==censat][order(-len)][1,1:3]
+  cname <- paste0(gsub(" .*","",bedcen[,1]),":",bedcen[,2]+1,"-",bedcen[,3])
+  censats <- samread(opt$genome,cname)
+  censats[,seq:=toupper(seq)]
+  censatsl <- data.table(n=(1:(nchar(censats$seq) %/% censat -1))*censat, 
+                         s= unlist(stri_sub_all(censats$seq, (1:(nchar(censats$seq) %/% censat -1))*censat,
+                                                (1:(nchar(censats$seq) %/% censat -1))*censat+(censat-1))))
+  censatsl[,p:=substr(s,1,13)]
+  censatsl[,c:=.N,p]
+  censatsl <- censatsl[c==max(c)]
+  censeq <- data.table(name = paste0(">CENSAT_",bedcen[,1],":",bedcen[,2],"-",bedcen[,3]), 
+                       seq= Biostrings::consensusString(Biostrings::DNAStringSet(censatsl$s), 
+                                                        ambiguityMap="N",threshold=0.4))
+  if (opt$output_folder != ".") {
+    dir.create(opt$output_folder, showWarnings = F)
+  }
+  wfasta(censeq, paste0(opt$output_folder,"/", gsub(".*/","",opt$genome),".censat_",censat,".fa"))
+  fwrite(centint[,c("chr","s","e")][,chr:=factor(chr, levels=c(fai$V1[fai$V1 %in% centint$chr] ))][order(chr)], 
+         paste0(opt$output_folder,"/", gsub(".*/","",opt$genome), ".censat_",censat,".bed"),
+         col.names = F, sep ="\t")
+} else {
+  centint <- data.table(chr=c(fai$V1, "scaffolds"), s=0,e=0)
+  centint$chr <- factor(centint$chr, levels= c(fai$V1, "scaffolds"))
+
+}
+
+bed[, bin := opt$window_size * floor(V2 / opt$window_size)]
+
+## New calculus of len taking just what falls in the bin
+bed[, len := min(V3, bin + opt$window_size) - max(V2, bin), .I]
+
+outsum <- bed[, .(tbases = sum(len)), by = c("V1", "bin", "sat")]
+outsum[, pbases := min(1, tbases / opt$window_size), .I]
+outchr <- outsum
+colnames(outchr) <- c( "chr", "bin", "sat","tbases","pbases")
+fakeout <- data.table(expand.grid(
+  chr = levels(ml$chr),
+  bin = opt$window_size * (0:(max(outchr$bin) / opt$window_size)),
+  sat = unique(outchr$sat),
+  tbases = 0,
+  pbases = 0
+))
+outchr <- rbind(fakeout, outchr)
+outchr[, bp := as.factor(sat)]
+
+maxbin <- max(outchr$bin) / opt$window_size
+outchr[, bin := factor(bin, levels = as.character(c(opt$window_size * 0:maxbin)))]
+cols <- rainbow(nrow(sats2)+1)[2:(nrow(sats2)+1)]
+names(cols) <- sats2$b
+if (censatf!=0) {
+  cols[as.character(censatf)] <- "#FF0000"
+} else {
+topsat <- bed[,sum(len),sat][order(-V1)][1]$sat
+cols[as.character(topsat)] <- "#FF0000"
+}
+bin_numeric <- as.numeric(levels(outchr$bin))
+max_bin <- max(bin_numeric)
+
+step <- ceiling(max_bin / 10 / 1e7) * 1e7
+breaks_numeric <- seq(0, max_bin, by = step)
+
+# match by numeric value, not string
+axis_breaks <- levels(outchr$bin)[bin_numeric %in% breaks_numeric]
+axis_labels <- sprintf("%g Mb", as.numeric(axis_breaks) / 1e6)
+
+# the xmax_pos conversion must also use the same bin_numeric reference
+ml[, xmax_pos := findInterval(x, bin_numeric)]
+centint[, s_pos := findInterval(s, bin_numeric)]
+centint[, e_pos := findInterval(e, bin_numeric)]
+centint[chr=="scaffolds", s_pos:=0]
+centint[chr=="scaffolds", e_pos:=0]
+ml$chr <- factor(ml$chr, levels = c(fai$V1, "scaffolds"))
+outchr$chr <- factor(outchr$chr, levels = c(fai$V1, "scaffolds"))
+p1 <- ggplot(outchr, aes(
+  x = bin,
+  y = pbases,
+  group = sat,
+  fill = bp
+)) +
+  geom_rect(
+    data = ml,
+    aes(
+      xmin = -0.1,
+      xmax = xmax_pos + 1,
+      ymin = -0.05,
+      ymax = 1.05
+    ),
+    inherit.aes = FALSE,
+    alpha = 0.1,
+    color = "darkgrey",
+    linewidth = 0.5
+  )  +
+  geom_rect(
+    data = centint,
+    aes(
+      xmin = s_pos,
+      xmax = e_pos,
+      ymin = 1.1,
+      ymax = 1.9
+    ),
+    inherit.aes = FALSE,
+    alpha = 0.8,
+    fill = "red",
+    linewidth = 0
+  )  +
+  geom_col() +
+  scale_fill_manual(values = cols) +
+  scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
+  labs(fill='SAT family') +
+  theme_void() +
+  ggtitle(paste(gsub(".*/","",opt$genome),"\n")) +
+  facet_wrap(facet = "chr",
+             ncol = 1,
+             strip.position = "left") +
+  theme(
+    strip.background = element_blank(),
+    strip.text.x = element_blank(),
+    axis.text.x = element_text(
+      angle = 0,
+      hjust = 0.5,
+      size = 10
+    ),
+    axis.ticks.x = element_line(),
+    plot.margin = margin(1, 1, 1, 1, "cm")
+  )
+
+setwd(oldpath)
+ggsave(
+  paste0(opt$output_folder,"/", gsub(".*/","",opt$genome), ".sats.png"),
+  bg = "white",
+  width = 7,
+  height =  2 + (length(levels(outchr$chr)) %/% 5),
+  create.dir = T
+)
+
