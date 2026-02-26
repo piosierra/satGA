@@ -80,11 +80,7 @@ if (is.null(opt$genome)) {
 }
 
 if (is.null(opt$output_folder)) {
-  if (grepl("/", opt$genome)) {
-    opt$output_folder <- gsub("/.*","",opt$genome)
-  } else {
-    opt$output_folder <- "."
-  } 
+    opt$output_folder <- dirname(opt$genome)
 }
 
 if (is.null(opt$min_sat)) {
@@ -256,9 +252,9 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= (nrow(fai) * opt$percentage))) {
   if (opt$output_folder != ".") {
     dir.create(opt$output_folder, showWarnings = F)
   }
-  wfasta(censeq, paste0(opt$output_folder,"/", gsub(".*/","",opt$genome),".censat_",censat,".fa"))
+  wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censat_",censat,".fa"))
   fwrite(centint[,c("chr","s","e")][,chr:=factor(chr, levels=c(fai$V1[fai$V1 %in% centint$chr] ))][order(chr)], 
-         paste0(opt$output_folder,"/", gsub(".*/","",opt$genome), ".censat_",censat,".bed"),
+         paste0(opt$output_folder,"/", basename(,opt$genome), ".censat_",censat,".bed"),
          col.names = F, sep ="\t")
 } else {
   centint <- data.table(chr=c(fai$V1, "scaffolds"), s=0,e=0)
@@ -350,7 +346,7 @@ p1 <- ggplot(outchr, aes(
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
   labs(fill='SAT family') +
   theme_void() +
-  ggtitle(paste(gsub(".*/","",opt$genome),"\n")) +
+  ggtitle(paste(basename(opt$genome),"\n")) +
   facet_wrap(facet = "chr",
              ncol = 1,
              strip.position = "left") +
@@ -368,7 +364,7 @@ p1 <- ggplot(outchr, aes(
 
 setwd(oldpath)
 ggsave(
-  paste0(opt$output_folder,"/", gsub(".*/","",opt$genome), ".sats.png"),
+  paste0(opt$output_folder,"/", basename(opt$genome), ".sats.png"),
   bg = "white",
   width = 7,
   height =  2 + (length(levels(outchr$chr)) %/% 5),
