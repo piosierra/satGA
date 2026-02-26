@@ -254,7 +254,7 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= (nrow(fai) * opt$percentage))) {
   }
   wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censat_",censat,".fa"))
   fwrite(centint[,c("chr","s","e")][,chr:=factor(chr, levels=c(fai$V1[fai$V1 %in% centint$chr] ))][order(chr)], 
-         paste0(opt$output_folder,"/", basename(,opt$genome), ".censat_",censat,".bed"),
+         paste0(opt$output_folder,"/", basename(opt$genome), ".censat_",censat,".bed"),
          col.names = F, sep ="\t")
 } else {
   centint <- data.table(chr=c(fai$V1, "scaffolds"), s=0,e=0)
