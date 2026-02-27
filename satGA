@@ -142,8 +142,9 @@ fai[,V1:=gsub(" .*","", V1)]
 bed[,V1:=gsub(" .*","", V1)]
 
 if (opt$chr == -1 & opt$sca_prefix=="") {
-  opt$chr <- nrow(fai[grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1)])
-} 
+  fai2 <- fai[!(grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1))]
+  fai <- fai[grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1)]
+} else {
 if (opt$sca_prefix!="") {
   fai2 <- fai[grepl(opt$sca_prefix, V1)]
   fai <- fai[!(grepl(opt$sca_prefix, V1))]
@@ -151,6 +152,8 @@ if (opt$sca_prefix!="") {
   fai2 <- fai[(opt$chr+1):nrow(fai)]
   fai <- fai[1:opt$chr]
 }
+}
+
 
 # ml stores the fai info with the collapsed scaffolds.
 ml <- fai[,1:2]
@@ -231,7 +234,7 @@ bed <- bed[sat > 0]
 bedu <- bed[cnt > 5 & len > 60000][order(-len)][, .SD[1], V1]
 bedu <- bedu[V1!="scaffolds"]
 censatf <- 0
-if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= (nrow(fai) * opt$percentage))) { # Select centromere sat candidate
+if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage))) { # Select centromere sat candidate
   censatf <- bedu[,.N,sat][order(-N)][1]$sat # In terms of family, for the plot
   censat <- bedu[sat==censatf,.N,V4][order(-N)][1]$V4 # In terms of actual size, for consensus
   centint <- bed[sat==censatf & len>40000,.(s=min(V2), e=max(V3)), V1]
