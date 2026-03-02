@@ -25,8 +25,8 @@ if (file.access(.libPaths(), mode=2)[1]!=0) {
   if (!file.exists(file.path(scriptPath, "Rlibs"))) {
     dir.create(file.path(scriptPath, "Rlibs"))
   }
-  .libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
 }
+.libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
 
 if (suppressPackageStartupMessages(!require("data.table", quietly = TRUE))) {
   print("Intalling package [data.table]")
@@ -141,7 +141,8 @@ split_intervals_by_bins <- function(dt, bin_size) {
 }
 
 interval_quantile <- function(dt, probs = c(0.25, 0.5, 0.75)) {
-  dominant_v4 <- dt[, .SD[which.max(V3 - V2), .(V4)], by = V1]
+ # dominant_v4 <- dt[, .SD[which.max(V3 - V2), .(V4)], by = V1]
+  dominant_v4 <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
   dt_filtered <- dt[dominant_v4, on = .(V1, V4), nomatch = 0]
   result <- dt_filtered[order(V2), {
     lengths  <- V3 - V2 + 1
@@ -215,7 +216,8 @@ ml[, chr := as.factor(chr)]
 bed <- bed[V4 > opt$min_sat]
 bed[, len := V3 - V2]
 bed[, cnt := len / V4]
-bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
+bedu <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
+# bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
 bed <- split_intervals_by_bins(bed[,1:4],opt$window_size)
 bed[, bin := opt$window_size * floor(V2 / opt$window_size)]
 bed[, len := V3 - V2]
@@ -229,6 +231,7 @@ j <- 1
 while (nrow(bedsc)>0) {
   sats[[j]] <- bedsc$V4[1]
   bedsc <- bedsc[!(V4 > sats[[j]] * 0.98 & V4 < sats[[j]] * 1.02)]
+  j <- j+1
 }
 # And the one with the longest contiguous TR of each chromosome if it is not already on the list
 if (nrow(bedu) > 0) {
@@ -276,14 +279,14 @@ bed$sat <- der
 # And remove entries with that do not belong to the sat list.
 bed <- bed[sat > 0]
 
-bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
+bedu <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
 bedu <- bedu[V1!="scaffolds"]
 censatf <- 0
 censeq <- data.table(name=as.character(), seq=as.character())
 if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage))) { # Select centromere sat candidate
   sav <- bed$V4
-  cval <- interval_quantile(bed, c(0.05,0.95))
-  csats <- interval_quantile(bed[,V4:=sat], c(0.05,0.95))
+  cval <- interval_quantile(bed[len>20000], c(0.05,0.95))
+  csats <- interval_quantile(bed[len>20000,V4:=sat], c(0.05,0.95))
   bed$V4 <- sav
   censatf <- bedu[,.N,sat][order(-N)][1]$sat # In terms of family, for the plot
   centint <- csats[V1!="scaffolds"]
@@ -319,7 +322,7 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
          paste0(opt$output_folder,"/", basename(opt$genome), ".censat_",censat,".bed"),
          col.names = F, sep ="\t")
 } else {
-  centint <- data.table(chr=c(fai$V1, "scaffolds"), s=0,e=0)
+  centint <- data.table(chr=c(fai$V1, "scaffolds"), start=0,end=0)
   centint$chr <- factor(centint$chr, levels= c(fai$V1, "scaffolds"))
 
 }
@@ -368,7 +371,7 @@ axis_labels <- sprintf("%g Mb", as.numeric(axis_breaks) / 1e6)
 
 # the xmax_pos conversion must also use the same bin_numeric reference
 ml[, xmax_pos := findInterval(x, bin_numeric)]
-centint[, s_pos := findInterval(start, bin_numeric)]
+centint[, s_pos := findInterval(start, bin_numeric),.I]
 centint[, e_pos := findInterval(end, bin_numeric)]
 centint[chr=="scaffolds", s_pos:=0]
 centint[chr=="scaffolds", e_pos:=0]
