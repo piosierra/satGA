@@ -436,8 +436,8 @@ p1 <- ggplot(outchr, aes(
     aes(
       xmin = s_pos,
       xmax = e_pos,
-      ymin = 1.1,
-      ymax = 1.9
+      ymin = -0.9,
+      ymax = -0.1
     ),
     inherit.aes = FALSE,
     alpha = 0.8,
@@ -546,8 +546,8 @@ p1 <- ggplot(outchr, aes(
     aes(
       xmin = s_pos,
       xmax = e_pos,
-      ymin = 1.1,
-      ymax = 1.9
+      ymin = -0.9,
+      ymax = -0.1
     ),
     inherit.aes = FALSE,
     alpha = 0.8,
