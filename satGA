@@ -63,8 +63,9 @@ if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
 }
 
 spec <- matrix(
-  c("genome",         "g", 1, "character", # genome assembly
+  c("genome",         "i", 1, "character", # genome assembly
     "output_folder",  "o", 1, "character", # Output foder
+    "gen_name",       "g", 1, "character", # Output foder
     "chr",            "n", 1, "integer",   # Number of chromosomes 
     "sca_prefix",     "s", 1, "character", # Scaffold identifier 
     "percentage",     "p", 1, "double", # Percentage of chr to call a censat
@@ -96,6 +97,11 @@ if (is.null(opt$min_sat)) {
 if (is.null(opt$min_censat)) {
   opt$min_censat <- 15
 }
+
+if (is.null(opt$gen_name)) {
+  opt$gen_name <- basename(opt$genome)
+}
+
 
 if (is.null(opt$percentage)) {
   opt$percentage <- 0.4
@@ -208,9 +214,9 @@ split_intervals_by_bins <- function(dt, bin_size) {
   return(result)
 }
 
-interval_quantile <- function(dt, probs = c(0.25, 0.5, 0.75)) {
+interval_quantile <- function(dt, probs = c(0.05,0.95), dominant_v4) {
  # dominant_v4 <- dt[, .SD[which.max(V3 - V2), .(V4)], by = V1]
-  dominant_v4 <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
+ # dominant_v4 <- bed[cnt > 5 & len > 20000][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
   dt_filtered <- dt[dominant_v4, on = .(V1, V4), nomatch = 0]
   result <- dt_filtered[order(V2), {
     lengths  <- V3 - V2 + 1
@@ -354,13 +360,16 @@ censatf <- 0
 censeq <- data.table(name=as.character(), seq=as.character())
 if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage))) { # Select centromere sat candidate
   sav <- bed$V4
-  cval <- interval_quantile(bed[len>30000], c(0.1,0.9))
-  csats <- interval_quantile(bed[len>30000,V4:=sat], c(0.1,0.9))
+  # dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
+  dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := max(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
+  cval <- interval_quantile(bed[len>opt$window_size * 0.3], c(0.05,0.95), dov4)
+  bed$V4 <- bed$sat
+  dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := max(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
+  csats <- interval_quantile(bed[len>opt$window_size * 0.3], c(0.05,0.95),dov4)
   bed$V4 <- sav
   censatf <- bedu[,.N,sat][order(-N)][1]$sat # In terms of family, for the plot
   centint <- csats[V1!="scaffolds"]
   ccons <- cval[V1!="scaffolds"]
-
   centint$chr <- factor(centint$V1, levels= c(fai$V1, "scaffolds"))
  # ccons$chr <- factor(centint$V1, levels= c(fai$V1, "scaffolds"))
   for (i in 1:nrow(ccons)) {
@@ -472,8 +481,8 @@ p1 <- ggplot(outchr, aes(
   geom_rect(
     data = centint,
     aes(
-      xmin = s_pos,
-      xmax = e_pos,
+      xmin = s_pos-1,
+      xmax = e_pos+1,
       ymin = -0.9,
       ymax = -0.1
     ),
@@ -487,7 +496,8 @@ p1 <- ggplot(outchr, aes(
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
   labs(fill='SAT family \n(grouped)') +
   theme_void() +
-  ggtitle(paste(basename(opt$genome),"\n")) +
+  ggtitle( opt$gen_name) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
   facet_wrap(facet = "chr",
              ncol = 1,
              strip.position = "left") +
@@ -582,8 +592,8 @@ p1 <- ggplot(outchr, aes(
   geom_rect(
     data = centint,
     aes(
-      xmin = s_pos,
-      xmax = e_pos,
+      xmin = s_pos-1,
+      xmax = e_pos+1,
       ymin = -0.9,
       ymax = -0.1
     ),
@@ -597,7 +607,8 @@ p1 <- ggplot(outchr, aes(
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
   labs(fill='SAT bp') +
   theme_void() +
-  ggtitle(paste(basename(opt$genome),"\n")) +
+  ggtitle(opt$gen_name) +
+  theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
   facet_wrap(facet = "chr",
              ncol = 1,
              strip.position = "left") +
