@@ -4,6 +4,7 @@
 # tables with the information.
 
 options(warn = 0)
+options(scipen=999)
 
 args = commandArgs(trailingOnly=TRUE)
 
@@ -36,6 +37,10 @@ if (suppressPackageStartupMessages(!require("ggplot2", quietly = TRUE))) {
   print("Intalling package [ggplot2]")
   install.packages("ggplot2", verbose =F) #
 }
+if (suppressPackageStartupMessages(!require("quantmod", quietly = TRUE))) {
+  lx("Intalling package [quantmod]")
+  install.packages("quantmod", verbose =F) #
+}
 if (suppressPackageStartupMessages(!require("ggpubr", quietly = TRUE))) {
   print("Intalling package [ggpubr]")
   install.packages("ggpubr", verbose =F) #
@@ -60,11 +65,12 @@ if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
 spec <- matrix(
   c("genome",         "g", 1, "character", # genome assembly
     "output_folder",  "o", 1, "character", # Output foder
-    "chr",            "c", 1, "integer",   # Number of chromosomes 
+    "chr",            "n", 1, "integer",   # Number of chromosomes 
     "sca_prefix",     "s", 1, "character", # Scaffold identifier 
     "percentage",     "p", 1, "double", # Percentage of chr to call a censat
     "window_size",    "w", 1, "integer",   # Window size
     "min_sat",        "m", 1, "integer",   # Min sat size
+    "min_censat",     "c", 1, "integer",   # Min censat size
     "help",           "h", 0, "logical"),  # Show this help 
   byrow = TRUE, ncol = 4)
 
@@ -84,7 +90,11 @@ if (is.null(opt$output_folder)) {
 }
 
 if (is.null(opt$min_sat)) {
-  opt$min_sat <- 4
+  opt$min_sat <- 5
+}
+
+if (is.null(opt$min_censat)) {
+  opt$min_censat <- 15
 }
 
 if (is.null(opt$percentage)) {
@@ -120,6 +130,64 @@ samread <- function(g,l) {
   return(data.table(name = fa_oneline[rep(c(TRUE, FALSE), length = .N)]$V1, 
                     seq = fa_oneline[rep(c(FALSE, TRUE), length = .N)]$V1))
 }
+
+## Original code from: https://github.com/etam4260/kneedle/blob/main/R/kneedle.R
+kneedle <- function(x, y, decreasing, concave, sensitivity = 1) {
+  data <- matrix(unlist(list(x, y)), ncol = 2)
+  data <- data[order(data[,1], decreasing = FALSE), ]
+  if(missing(decreasing)) {
+    if( (data[(nrow(data)), 2] - data[1, 2]) >= 0 ) {
+      decreasing = FALSE
+    } else {
+      decreasing = TRUE
+    }
+  }
+  if(missing(concave)) {
+    secondderiv <- diff(diff(data[, 2]) / diff(data[, 1]))
+    if(mean(secondderiv) > 0) {
+      concave = TRUE
+    } else {
+      concave = FALSE
+    }
+  }
+  maxy <- max(y)
+  miny <- min(y)
+  maxx <- max(x)
+  minx <- min(x)
+  data[ ,1] <- (data[, 1]- min(data[, 1]))/(max(data[ ,1])- min(data[, 1]))
+  data[ ,2] <- (data[, 2]- min(data[, 2]))/(max(data[ ,2])- min(data[, 2]))
+  if(concave && !decreasing) {
+    differ <- abs(c(data[ ,2] - data[ ,1]))
+  } else if(concave && decreasing) {
+    differ <- abs(c(data[ ,2] - (1 - data[ ,1])))
+  } else if(!concave && !decreasing) {
+    differ <- abs(c(data[ ,2] - data[ ,1]))
+  } else if(!concave && decreasing) {
+    differ <- abs(c(data[ ,2] - (1 - data[ ,1])))
+  }
+  peak.indices <- findPeaks(differ) - 1
+  data <- cbind(data, differ)
+  diffx = diff(data[, 1])
+  T.lm.x.s <- sensitivity * mean(diffx)
+  knee = NULL
+  for(i in 1:length(peak.indices)) {
+    T <- data[peak.indices[i] ,3] - (T.lm.x.s)
+    y.value <- data[peak.indices[i] ,3]
+    for(j in (peak.indices[i]):if(i+1 < length(peak.indices)) peak.indices[i+1] else length(differ)) {
+      if(differ[j] < T) {
+        knee = peak.indices[i];
+        break;
+      }
+    }
+    if(!is.null(knee)) {
+      break;
+    }
+  }
+  x <- ((maxx - minx) * (data[knee, 1])) + minx
+  y <- ((maxy - miny) * (data[knee, 2])) + miny
+  return(c(as.numeric(x),as.numeric(y)))
+}
+
 
 split_intervals_by_bins <- function(dt, bin_size) {
   dt[, row_id := .I]
@@ -212,25 +280,26 @@ bed[!(bed$V1 %in% fai$V1), V1 := "scaffolds"]
 
 ml[, xmax_pos := x / opt$window_size]
 ml[, chr := as.factor(chr)]
-# Remove TRs with repeat len < 5
-bed <- bed[V4 > opt$min_sat]
+# Remove TRs with repeat len < min_sat
+bed <- bed[V4 >= opt$min_sat]
 bed[, len := V3 - V2]
 bed[, cnt := len / V4]
-bedu <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
+bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
 # bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
 bed <- split_intervals_by_bins(bed[,1:4],opt$window_size)
 bed[, bin := opt$window_size * floor(V2 / opt$window_size)]
 bed[, len := V3 - V2]
 bed[, cnt := len / V4]
-beds <- bed[cnt > 5, sum(len), V4][order(-V1)]
+beds <- bed[V4 >= opt$min_censat & cnt > 5, sum(len), V4][order(-V1)]
 beds[,cs:=cumsum(V1) / sum(V1)]
 # New strategy, we take the sats that add up to 70% content of all the masked trs
 sats <- list()
-bedsc <- beds[cs < 0.7]
+bedsc <- beds[cs < (min(beds$cs) + (1- kneedle(1:nrow(beds),(1-beds$cs))[2])) /2]
 j <- 1
 while (nrow(bedsc)>0) {
   sats[[j]] <- bedsc$V4[1]
-  bedsc <- bedsc[!(V4 > sats[[j]] * 0.98 & V4 < sats[[j]] * 1.02)]
+  sats_int <- floor(log10(sats[[j]]))+1
+  bedsc <- bedsc[!(V4 > sats[[j]] - sats_int & V4 < sats[[j]] + sats_int)]
   j <- j+1
 }
 # And the one with the longest contiguous TR of each chromosome if it is not already on the list
@@ -240,7 +309,8 @@ if (nrow(bedu) > 0) {
     h <- 0
     while (h < length(sats)) {
       h <- h + 1
-      if (new > sats[[h]] * 0.98 & new < sats[[h]] * 1.02) {
+      sats_int <- floor(log10(sats[[h]]))+1
+      if (new > sats[[h]] - sats_int & new < sats[[h]] + sats_int) {
         new <- 0
       }
     }
@@ -251,11 +321,10 @@ if (nrow(bedu) > 0) {
 }
 
 # Build the sats list and make sure their margins do not overlap.
-sats2 <- data.table(
-  b = unlist(sats),
-  s = unlist(sats) * 0.98,
-  e = unlist(sats) * 1.02
-)[order(s)]
+sats2 <- data.table(b = unlist(sats))
+sats2[, s:= b-(floor(log10(b))+1)]
+sats2[, e:= b+floor(log10(b))+1]
+sats2 <- sats2[order(s)]
 sats2[, x := s <= data.table::shift(e)]
 sats2[, ne := e]
 sats2[, ns := s]
@@ -279,14 +348,14 @@ bed$sat <- der
 # And remove entries with that do not belong to the sat list.
 bed <- bed[sat > 0]
 
-bedu <- bed[cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
+bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
 bedu <- bedu[V1!="scaffolds"]
 censatf <- 0
 censeq <- data.table(name=as.character(), seq=as.character())
 if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage))) { # Select centromere sat candidate
   sav <- bed$V4
-  cval <- interval_quantile(bed[len>20000], c(0.05,0.95))
-  csats <- interval_quantile(bed[len>20000,V4:=sat], c(0.05,0.95))
+  cval <- interval_quantile(bed[len>30000], c(0.1,0.9))
+  csats <- interval_quantile(bed[len>30000,V4:=sat], c(0.1,0.9))
   bed$V4 <- sav
   censatf <- bedu[,.N,sat][order(-N)][1]$sat # In terms of family, for the plot
   centint <- csats[V1!="scaffolds"]
@@ -297,6 +366,7 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
   for (i in 1:nrow(ccons)) {
     
   bedcen <- bed[V1 == ccons[i]$V1 & V4==ccons[i]$V4][order(-len)][1,1:3]
+  if (!is.na(bedcen[1,1])) {
   censat <- ccons[i]$V4
   cname <- paste0(gsub(" .*","",bedcen[,1]),":",bedcen[,2]+1,"-",bedcen[,3])
   censats <- samread(opt$genome,cname)
@@ -307,14 +377,16 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
   censatsl[,p:=substr(s,1,13)]
   censatsl[,c:=.N,p]
   censatsl <- censatsl[c==max(c)]
+  consseq <- Biostrings::consensusString(Biostrings::DNAStringSet(censatsl$s), ambiguityMap="N",threshold=0.5)
+  if ((stri_count(consseq,fixed="N"))/nchar(consseq) < 0.02) {
   censeq <- rbindlist(list(censeq,data.table(name = paste0(">CENSAT_",censat,"#",bedcen[,1],":",bedcen[,2],"-",bedcen[,3]), 
-                       seq= Biostrings::consensusString(Biostrings::DNAStringSet(censatsl$s), 
-                                                        ambiguityMap="N",threshold=0.5))))
+                       seq= consseq)))
+  }
+}
+  }
+ }
   if (opt$output_folder != ".") {
     dir.create(opt$output_folder, showWarnings = F)
-  }
- # wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censat_",censat,"#",bedcen[,1],"_",bedcen[,2],"-",bedcen[,3],".fa"))
-  }
   if (nrow(censeq)>0) {
     wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censats.fa"))
   }
@@ -405,14 +477,14 @@ p1 <- ggplot(outchr, aes(
       ymax = -0.1
     ),
     inherit.aes = FALSE,
-    alpha = 0.8,
+    alpha = 1,
     fill = "red",
     linewidth = 0
   )  +
   geom_col() +
   scale_fill_manual(values = cols) +
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
-  labs(fill='SAT family \n+- 2% bp') +
+  labs(fill='SAT family \n(grouped)') +
   theme_void() +
   ggtitle(paste(basename(opt$genome),"\n")) +
   facet_wrap(facet = "chr",
@@ -461,8 +533,8 @@ outchr[, bp := as.factor(sat)]
 
 maxbin <- max(outchr$bin) / opt$window_size
 outchr[, bin := factor(bin, levels = as.character(c(opt$window_size * 0:maxbin)))]
-cols <- rainbow(length(unique(bed$sat))+1)[2:(length(unique(bed$sat))+1)]
-names(cols) <- unique(bed$sat)
+cols <- rainbow(length(unique(bed$sat))+floor(length(unique(bed$sat))/10)+1)[(floor(length(unique(bed$sat))/10)+1):(length(unique(bed$sat))+floor(length(unique(bed$sat))/10)+1)]
+names(cols) <- unique(bed$sat)[order(unique(bed$sat))]
 if (censatf!=0) {
   cols[as.character(censatf)] <- "#FF0000"
 } else {
@@ -515,14 +587,14 @@ p1 <- ggplot(outchr, aes(
       ymax = -0.1
     ),
     inherit.aes = FALSE,
-    alpha = 0.8,
+    alpha = 1,
     fill = "red",
     linewidth = 0
   )  +
   geom_col() +
   scale_fill_manual(values = cols) +
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
-  labs(fill='SAT family') +
+  labs(fill='SAT bp') +
   theme_void() +
   ggtitle(paste(basename(opt$genome),"\n")) +
   facet_wrap(facet = "chr",
