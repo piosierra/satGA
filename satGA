@@ -362,6 +362,7 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
   sav <- bed$V4
   # dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
   dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := max(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
+  mainsat <- dov4[,.N,V4][order(-N)][1]$V4
   cval <- interval_quantile(bed[len>opt$window_size * 0.3], c(0.05,0.95), dov4)
   bed$V4 <- bed$sat
   dov4 <- bed[cnt > 5 & len > opt$window_size * 0.3][, sl := max(len), c("V1","V4")][order(-sl)][, .SD[1], V1][,c(1,4)]
@@ -401,7 +402,7 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
     wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censats.fa"))
   }
   fwrite(csats[V1!="scaffolds",c("V1","start","end","V4")][,V1:=factor(V1, levels=c(fai$V1[fai$V1 %in% csats$V1] ))][order(V1)], 
-         paste0(opt$output_folder,"/", basename(opt$genome), ".censat_",censat,".bed"),
+         paste0(opt$output_folder,"/", basename(opt$genome), ".censat_",mainsat,".bed"),
          col.names = F, sep ="\t")
 } else {
   centint <- data.table(chr=c(fai$V1, "scaffolds"), start=0,end=0)
