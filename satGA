@@ -383,10 +383,11 @@ if ((nrow(bedu)>0)  &  (max(table(bedu$sat)) >= ((nrow(fai)-1) * opt$percentage)
                        seq= consseq)))
   }
 }
-  }
+  
  }
   if (opt$output_folder != ".") {
     dir.create(opt$output_folder, showWarnings = F)
+  }
   if (nrow(censeq)>0) {
     wfasta(censeq, paste0(opt$output_folder,"/", basename(opt$genome),".censats.fa"))
   }
