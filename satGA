@@ -374,7 +374,7 @@ ml[, chr := as.factor(chr)]
 bed <- bed[V4 >= opt$min_sat]
 bed[, len := V3 - V2]
 bed[, cnt := len / V4]
-bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
+bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][sl>50000][order(-sl)][, .SD[1], V1]
 # bedu <- bed[cnt > 5 & len > 30000][order(-len)][, .SD[1], V1]
 bed <- split_intervals_by_bins(bed[,1:4],opt$window_size)
 bed[, bin := opt$window_size * floor(V2 / opt$window_size)]
@@ -469,6 +469,7 @@ bed$V4 <- sav
 ####
 
 if (!is.na(mainsat)) { # Select centromere sat candidate
+  satname <- paste("censat candidate :",mainsat)
   centint <- bestcensat[V4== mainsat & goodcen==T]
   ccons <- bestcenbp[V4== mainsat & goodcen==T]
   centint$chr <- factor(centint$V1, levels= c(fai$V1, "scaffolds"))
@@ -507,7 +508,7 @@ if (!is.na(mainsat)) { # Select centromere sat candidate
 } else {
   centint <- data.table(chr=c(fai$V1, "scaffolds"), start=0,end=0)
   centint$chr <- factor(centint$chr, levels= c(fai$V1, "scaffolds"))
-
+  satname <- ""
 }
 
 
@@ -606,7 +607,7 @@ p1 <- ggplot(outchr, aes(
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
   labs(fill='SAT family \n(grouped)') +
   theme_void() +
-  ggtitle( opt$gen_name) +
+  ggtitle(paste(opt$gen_name,"\n", satname)) +
   theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
   facet_wrap(facet = "chr",
              ncol = 1,
@@ -723,7 +724,7 @@ p1 <- ggplot(outchr, aes(
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
   labs(fill='SAT bp') +
   theme_void() +
-  ggtitle(opt$gen_name) +
+  ggtitle(paste(opt$gen_name, "\n",satname)) +
   theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
   facet_wrap(facet = "chr",
              ncol = 1,
