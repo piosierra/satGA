@@ -3,15 +3,12 @@
 # Select best candidates for relevant sats accumulation and return plots and 
 # tables with the information.
 
-options(warn = 0)
+####
+#### Check if all libraries are available, install if not
+####
+
+ # options(warn = 0)
 options(scipen=999)
-
-args = commandArgs(trailingOnly=TRUE)
-
-if (length(args)<3 & length(args)>5) {
-  print("usage: satselect file.fai file.bed output_folder [number_of_chr] [opt$window_size]")
-  quit()
-}
 
 cmdArgs <- commandArgs(trailingOnly = FALSE)
 scriptPath <- normalizePath(dirname(sub("^--file=", "", cmdArgs[grep("^--file=", cmdArgs)])))[1]
@@ -62,6 +59,18 @@ if (suppressPackageStartupMessages(!require("Biostrings", quietly = TRUE))) {
   BiocManager::install("Biostrings", verbose =F) #
 }
 
+
+####
+#### Read params
+####
+
+args = commandArgs(trailingOnly=TRUE)
+
+if (length(args)<3 & length(args)>5) {
+  print("usage: satselect file.fai file.bed output_folder [number_of_chr] [opt$window_size]")
+  quit()
+}
+
 spec <- matrix(
   c("genome",         "i", 1, "character", # genome assembly
     "output_folder",  "o", 1, "character", # Output foder
@@ -107,6 +116,10 @@ if (is.null(opt$percentage)) {
   opt$percentage <- 0.4
 }
 
+if (is.null(opt$percentage)) {
+  opt$max_gap <- 3000
+}
+
 if (is.null(opt$chr)) {
   opt$chr <- -1
 }
@@ -121,7 +134,10 @@ if (is.null(opt$window_size)) {
   opt$window_size <- as.numeric(opt$window_size)
 }
 
-# Auxiliary functions
+
+####
+#### Define aux functions
+####
 
 wfasta <- function(fasta_data, f) {
   fileconn <- file(f)
@@ -261,8 +277,15 @@ interval_quantile <- function(dt, probs = c(0.05,0.95), dominant_v4) {
   return(result)
 }
 
+####
+#### Main
+####
 
-### Main
+
+####
+#### Generate and read auxiliary files
+####
+
 
 oldpath <- getwd()
 
@@ -283,13 +306,16 @@ bed <- fread(paste0(opt$genome,".tan.1aln.bed"))
 fai[,V1:=gsub(" .*","", V1)]
 bed[,V1:=gsub(" .*","", V1)]
 
-# collapsing bed intervals with gap <3000 and same sat
+
+####
+#### Check intervals with same sat and gap <= max_gap
+####
 
 bed[, grp := cumsum(
   is.na(data.table::shift(V2)) |              # first row (numeric column)
     V1 != data.table::shift(V1) |               # new chromosome
     V4 != data.table::shift(V4) |               # V4 changes
-    (V2 - data.table::shift(V3)) >= 3000        # gap too large
+    (V2 - data.table::shift(V3)) > opt$max_gap        # gap too large
 )]
 
 bed <- bed[, .(
@@ -299,6 +325,11 @@ bed <- bed[, .(
 ), by = .(V1, grp)][, grp := NULL]
 
 setorder(bed, V1, V2)
+
+
+####
+#### Separate chromosomes from scaffolds
+####
 
 if (opt$chr == -1 & opt$sca_prefix=="") {
   fai2 <- fai[!(grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1))]
@@ -321,11 +352,21 @@ ml <- rbindlist(list(ml, data.table(
 )))
 fai2 <- data.table(V1 = fai2$V1,
                    offset = cumsum(fai2$V2) - fai2$V2)
+
+####
+#### Merge scaffolds into a single one
+####
+
 bed <- merge(bed, fai2, by = "V1", all.x = T)
 bed[is.na(offset), offset := 0]
 bed[, V2 := V2 + offset]
 bed[, V3 := V3 + offset]
 bed[!(bed$V1 %in% fai$V1), V1 := "scaffolds"]
+
+
+####
+#### Process bed data with the new scaffold, divive the intervals in the bins
+####
 
 ml[, xmax_pos := x / opt$window_size]
 ml[, chr := as.factor(chr)]
@@ -341,7 +382,12 @@ bed[, len := V3 - V2]
 bed[, cnt := len / V4]
 beds <- bed[V4 >= opt$min_censat & cnt > 5, sum(len), V4][order(-V1)]
 beds[,cs:=cumsum(V1) / sum(V1)]
-# New strategy, we take the sats that add up to 70% content of all the masked trs
+
+
+####
+#### Select candidate sats, 
+####
+
 sats <- list()
 bedsc <- beds[cs < (min(beds$cs) + (1- kneedle(1:nrow(beds),(1-beds$cs))[2])) /2]
 j <- 1
@@ -382,7 +428,7 @@ sats2[, ne := (e + data.table::shift(s, -1)) / 2 - 0.005]
 sats2[x == T, s := ns]
 sats2[data.table::shift(x, -1) == T, e := ne]
 # Then assign to each bed annotation the relevant sat.
-der <- unlist(lapply(1:nrow(bed), function(x) {
+bed$sat <- unlist(lapply(1:nrow(bed), function(x) {
   che <- bed$V4[x]  <= sats2$e & bed$V4[x]  >= sats2$s
   blu <- sats2[che]$b
   if (length(blu) > 0) {
@@ -393,12 +439,16 @@ der <- unlist(lapply(1:nrow(bed), function(x) {
   }
 }))
 
-bed$sat <- der
-# And remove entries with that do not belong to the sat list.
+# And remove entries that do not belong to the sat list.
 bed <- bed[sat > 0]
 
-bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
-bedu <- bedu[V1!="scaffolds"]
+
+####
+#### Find a candidate for best centromeric satellite
+####
+
+# bedu <- bed[V4 >= opt$min_censat & cnt > 5][, sl := sum(len), c("V1","V4")][order(-sl)][, .SD[1], V1]
+# bedu <- bedu[V1!="scaffolds"]
 mainsat <- 0
 censeq <- data.table(name=as.character(), seq=as.character())
 bestcenbp <- rbindlist(lapply(sats, function(x) { interval_quantile_single(bed[V1!= "scafolds" & len>opt$window_size * 0.1], c(0.05,0.95),x)}))
@@ -411,6 +461,12 @@ bestcensat <- merge(bestcensat,fai[,1:2], by="V1")
 bestcensat[,goodcen:=(end-start)<V2*0.4, .I]
 mainsat <- bestcensat[,sum(goodcen), V4][V1 >= ((nrow(fai)-1) * opt$percentage) ][1]$V4
 bed$V4 <- sav
+
+
+####
+#### if there is a candidate, generate bed file, consensus, and rectangles for the plot with it
+####
+
 if (!is.na(mainsat)) { # Select centromere sat candidate
   centint <- bestcensat[V4== mainsat & goodcen==T]
   ccons <- bestcenbp[V4== mainsat & goodcen==T]
@@ -454,7 +510,9 @@ if (!is.na(mainsat)) { # Select centromere sat candidate
 }
 
 
-
+####
+#### Prepare data for the plots
+####
 
 bed[, bin := opt$window_size * floor(V2 / opt$window_size)]
 
@@ -479,7 +537,7 @@ maxbin <- max(outchr$bin) / opt$window_size
 outchr[, bin := factor(bin, levels = as.character(c(opt$window_size * 0:maxbin)))]
 cols <- rainbow(nrow(sats2)+1)[2:(nrow(sats2)+1)]
 names(cols) <- sats2$b
-if (mainsat!=0) {
+if (!is.na(mainsat)) {
   cols[as.character(mainsat)] <- "#FF0000"
 } else {
 topsat <- bed[,sum(len),sat][order(-V1)][1]$sat
@@ -504,6 +562,12 @@ centint[chr=="scaffolds", s_pos:=0]
 centint[chr=="scaffolds", e_pos:=0]
 ml$chr <- factor(ml$chr, levels = c(fai$V1, "scaffolds"))
 outchr$chr <- factor(outchr$chr, levels = c(fai$V1, "scaffolds"))
+
+
+####
+#### Create plot
+####
+
 p1 <- ggplot(outchr, aes(
   x = bin,
   y = pbases,
@@ -570,6 +634,11 @@ ggsave(
   create.dir = T
 )
 
+
+####
+#### Use TR bp instead of sat family for the plot 
+####
+
 bed$sat <- bed$V4
 bed[,n:=.N,sat]
 bed <- bed[n>10]
@@ -591,7 +660,7 @@ maxbin <- max(outchr$bin) / opt$window_size
 outchr[, bin := factor(bin, levels = as.character(c(opt$window_size * 0:maxbin)))]
 cols <- rainbow(length(unique(bed$sat))+floor(length(unique(bed$sat))/10)+1)[(floor(length(unique(bed$sat))/10)+1):(length(unique(bed$sat))+floor(length(unique(bed$sat))/10)+1)]
 names(cols) <- unique(bed$sat)[order(unique(bed$sat))]
-if (mainsat!=0) {
+if (!is.na(mainsat)) {
   cols[as.character(mainsat)] <- "#FF0000"
 } else {
   topsat <- bed[,sum(len),sat][order(-V1)][1]$sat
