@@ -570,6 +570,7 @@ outchr$chr <- factor(outchr$chr, levels = c(fai$V1, "scaffolds"))
 #### Create plot
 ####
 
+
 p1 <- ggplot(outchr, aes(
   x = bin,
   y = pbases,
@@ -585,10 +586,10 @@ p1 <- ggplot(outchr, aes(
       ymax = 1.05
     ),
     inherit.aes = FALSE,
-    alpha = 0.1,
-    color = "darkgrey",
-    linewidth = 0.5
-  )  +
+    alpha = 0.06,
+    color = "grey60",
+    linewidth = 0.3
+  ) +
   geom_rect(
     data = centint,
     aes(
@@ -599,32 +600,69 @@ p1 <- ggplot(outchr, aes(
     ),
     inherit.aes = FALSE,
     alpha = 1,
-    fill = "red",
+    fill = "#C0392B",
     linewidth = 0
-  )  +
+  ) +
   geom_col() +
   scale_fill_manual(values = cols) +
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
-  labs(fill='SAT family \n(grouped)') +
-  theme_void() +
-  ggtitle(paste(opt$gen_name,"\n", satname)) +
-  theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
-  facet_wrap(facet = "chr",
-             ncol = 1,
-             strip.position = "left") +
+  scale_y_continuous(limits = c(-0.9, 1.05)) +
+  labs(fill = "SAT family\n(grouped)", y = NULL) +
+  ggtitle(paste(opt$gen_name, "\n", satname)) +
+  facet_wrap(
+    facet = "chr",
+    ncol = 1,
+    strip.position = "left"
+  ) +
+  theme_minimal(base_family = "Helvetica", base_size = 11) +
   theme(
+    # Title
+    plot.title = element_text(
+      hjust = 0.5,
+      vjust = 1,
+      size = 13,
+      face = "bold",
+      color = "grey20",
+      margin = margin(b = 8)
+    ),
+    # Facet strips
     strip.background = element_blank(),
-    legend.key.size = unit(0.2, 'cm'),
-    legend.text = element_text(size=8),
-    legend.title = element_text(size=14),
+    strip.text.y.left = element_text(
+      size = 9,
+      color = "grey30",
+      face = "bold",
+      angle = 0,
+      hjust = 1,
+      margin = margin(r = 4)
+    ),
     strip.text.x = element_blank(),
+    # Axes
     axis.text.x = element_text(
       angle = 0,
       hjust = 0.5,
-      size = 10
+      size = 9,
+      color = "grey30"
     ),
-    axis.ticks.x = element_line(),
-    plot.margin = margin(1, 1, 1, 1, "cm")
+    axis.ticks.x = element_line(color = "grey60", linewidth = 0.3),
+    axis.ticks.length.x = unit(0.15, "cm"),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    # Legend
+    legend.position = "right",
+    legend.justification = "center",
+    legend.key.size = unit(0.35, "cm"),
+    legend.key = element_rect(color = NA, fill = NA),
+    legend.text = element_text(size = 8, color = "grey20"),
+    legend.title = element_text(size = 10, face = "bold", color = "grey20"),
+    legend.spacing.y = unit(0.15, "cm"),
+    legend.margin = margin(l = 6),
+    # Panel & grid
+    panel.grid = element_blank(),
+    panel.spacing = unit(0.15, "cm"),
+    # Margins
+    plot.margin = margin(1, 1, 1, 1, "cm"),
+    plot.background = element_rect(fill = "white", color = NA)
   )
 
 setwd(oldpath)
@@ -687,6 +725,7 @@ centint[chr=="scaffolds", s_pos:=0]
 centint[chr=="scaffolds", e_pos:=0]
 ml$chr <- factor(ml$chr, levels = c(fai$V1, "scaffolds"))
 outchr$chr <- factor(outchr$chr, levels = c(fai$V1, "scaffolds"))
+
 p1 <- ggplot(outchr, aes(
   x = bin,
   y = pbases,
@@ -702,10 +741,10 @@ p1 <- ggplot(outchr, aes(
       ymax = 1.05
     ),
     inherit.aes = FALSE,
-    alpha = 0.1,
-    color = "darkgrey",
-    linewidth = 0.5
-  )  +
+    alpha = 0.06,
+    color = "grey60",
+    linewidth = 0.3
+  ) +
   geom_rect(
     data = centint,
     aes(
@@ -716,34 +755,70 @@ p1 <- ggplot(outchr, aes(
     ),
     inherit.aes = FALSE,
     alpha = 1,
-    fill = "red",
+    fill = "#C0392B",
     linewidth = 0
-  )  +
+  ) +
   geom_col() +
   scale_fill_manual(values = cols) +
   scale_x_discrete(breaks = axis_breaks, labels = axis_labels) +
-  labs(fill='SAT bp') +
-  theme_void() +
-  ggtitle(paste(opt$gen_name, "\n",satname)) +
-  theme(plot.title = element_text(hjust = 0.5, vjust = 1)) +
-  facet_wrap(facet = "chr",
-             ncol = 1,
-             strip.position = "left") +
+  scale_y_continuous(limits = c(-0.9, 1.05)) +
+  labs(fill = "SAT bp", y = NULL) +
+  ggtitle(paste(opt$gen_name, "\n", satname)) +
+  facet_wrap(
+    facet = "chr",
+    ncol = 1,
+    strip.position = "left"
+  ) +
+  theme_minimal(base_family = "Helvetica", base_size = 11) +
   theme(
+    # Title
+    plot.title = element_text(
+      hjust = 0.5,
+      vjust = 1,
+      size = 13,
+      face = "bold",
+      color = "grey20",
+      margin = margin(b = 8)
+    ),
+    # Facet strips
     strip.background = element_blank(),
-    legend.key.size = unit(0.2, 'cm'),
-    legend.text = element_text(size=8),
-    legend.title = element_text(size=14),
+    strip.text.y.left = element_text(
+      size = 9,
+      color = "grey30",
+      face = "bold",
+      angle = 0,
+      hjust = 1,
+      margin = margin(r = 4)
+    ),
     strip.text.x = element_blank(),
+    # Axes
     axis.text.x = element_text(
       angle = 0,
       hjust = 0.5,
-      size = 10
+      size = 9,
+      color = "grey30"
     ),
-    axis.ticks.x = element_line(),
-    plot.margin = margin(1, 1, 1, 1, "cm")
+    axis.ticks.x = element_line(color = "grey60", linewidth = 0.3),
+    axis.ticks.length.x = unit(0.15, "cm"),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    # Legend
+    legend.position = "right",
+    legend.justification = "center",
+    legend.key.size = unit(0.35, "cm"),
+    legend.key = element_rect(color = NA, fill = NA),
+    legend.text = element_text(size = 8, color = "grey20"),
+    legend.title = element_text(size = 10, face = "bold", color = "grey20"),
+    legend.spacing.y = unit(0.15, "cm"),
+    legend.margin = margin(l = 6),
+    # Panel & grid
+    panel.grid = element_blank(),
+    panel.spacing = unit(0.15, "cm"),
+    # Margins
+    plot.margin = margin(1, 1, 1, 1, "cm"),
+    plot.background = element_rect(fill = "white", color = NA)
   )
-
 
 ggsave(
   paste0(opt$output_folder,"/", basename(opt$genome), ".sats.png"),
