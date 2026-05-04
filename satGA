@@ -13,18 +13,6 @@ options(scipen=999)
 cmdArgs <- commandArgs(trailingOnly = FALSE)
 scriptPath <- normalizePath(dirname(sub("^--file=", "", cmdArgs[grep("^--file=", cmdArgs)])))[1]
 
-local({
-  r <- getOption("repos")
-  r["CRAN"] <- "https://cran.r-project.org"
-  options(repos = r)
-})
-
-if (file.access(.libPaths(), mode=2)[1]!=0) {
-  if (!file.exists(file.path(scriptPath, "Rlibs"))) {
-    dir.create(file.path(scriptPath, "Rlibs"))
-  }
-}
-.libPaths(c(file.path(scriptPath, "Rlibs"), .libPaths()))
 
 if (suppressPackageStartupMessages(!require("data.table", quietly = TRUE))) {
   print("Intalling package [data.table]")
@@ -35,7 +23,7 @@ if (suppressPackageStartupMessages(!require("ggplot2", quietly = TRUE))) {
   install.packages("ggplot2", verbose =F) #
 }
 if (suppressPackageStartupMessages(!require("quantmod", quietly = TRUE))) {
-  lx("Intalling package [quantmod]")
+  print("Intalling package [quantmod]")
   install.packages("quantmod", verbose =F) #
 }
 if (suppressPackageStartupMessages(!require("ggpubr", quietly = TRUE))) {
@@ -74,9 +62,9 @@ if (length(args)<3 & length(args)>5) {
 spec <- matrix(
   c("genome",         "i", 1, "character", # genome assembly
     "output_folder",  "o", 1, "character", # Output foder
-    "gen_name",       "g", 1, "character", # Output foder
+    "gen_name",       "g", 1, "character", # genome name
     "chr",            "n", 1, "integer",   # Number of chromosomes 
-    "sca_prefix",     "s", 1, "character", # Scaffold identifier 
+    "sca_id",         "s", 1, "character", # Scaffold identifier 
     "percentage",     "p", 1, "double", # Percentage of chr to call a censat
     "window_size",    "w", 1, "integer",   # Window size
     "min_sat",        "m", 1, "integer",   # Min sat size
@@ -124,8 +112,8 @@ if (is.null(opt$chr)) {
   opt$chr <- -1
 }
 
-if (is.null(opt$sca_prefix)) {
-  opt$sca_prefix <- ""
+if (is.null(opt$sca_id)) {
+  opt$sca_id <- ""
 }
 
 if (is.null(opt$window_size)) {
@@ -146,7 +134,7 @@ wfasta <- function(fasta_data, f) {
 }
 
 samread <- function(g,l) {
-  fa_raw <- fread(cmd = paste("samtools faidx", g, l), header = F, fill = T, sep = "\n")
+  fa_raw <- fread(cmd = paste0("samtools faidx ", g, " '",l,"'"), header = F, fill = T, sep = "\n")
   fa_raw[, h := grepl(">", V1)]
   fa_oneline <- fa_raw[, .(paste0(V1, collapse = "")), by = rleid(h)]
   return(data.table(name = fa_oneline[rep(c(TRUE, FALSE), length = .N)]$V1, 
@@ -331,13 +319,17 @@ setorder(bed, V1, V2)
 #### Separate chromosomes from scaffolds
 ####
 
-if (opt$chr == -1 & opt$sca_prefix=="") {
-  fai2 <- fai[!(grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1))]
-  fai <- fai[grepl(paste0("^", substr(fai[1]$V1, 1, 2)), V1)]
+if (opt$chr == -1 & opt$sca_id=="") {
+  fai2 <- fai[!(grepl(paste0("^", substr(fai[1]$V1, 1, 6)), V1))]
+  fai <- fai[grepl(paste0("^", substr(fai[1]$V1, 1, 6)), V1)]
 } else {
-if (opt$sca_prefix!="") {
-  fai2 <- fai[grepl(opt$sca_prefix, V1)]
-  fai <- fai[!(grepl(opt$sca_prefix, V1))]
+if (opt$sca_id!="") {
+  names <- system(paste0("grep '>' ",opt$genome), intern = T)
+  names <- grep(opt$sca_id,names)
+  #fai2 <- fai[grepl(opt$sca_id, V1)]
+  #fai <- fai[!(grepl(opt$sca_id, V1))]
+  fai2 <- fai[names]
+  fai <- fai[!(names)]
 } else {
   fai2 <- fai[(opt$chr+1):nrow(fai)]
   fai <- fai[1:opt$chr]
@@ -666,6 +658,7 @@ p1 <- ggplot(outchr, aes(
   )
 
 setwd(oldpath)
+
 ggsave(
   paste0(opt$output_folder,"/", basename(opt$genome), ".satsfams.png"),
   bg = "white",
@@ -819,7 +812,6 @@ p1 <- ggplot(outchr, aes(
     plot.margin = margin(1, 1, 1, 1, "cm"),
     plot.background = element_rect(fill = "white", color = NA)
   )
-
 ggsave(
   paste0(opt$output_folder,"/", basename(opt$genome), ".sats.png"),
   bg = "white",
